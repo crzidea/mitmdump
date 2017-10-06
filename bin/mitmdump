@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+const url = require('url')
+const http = require('http')
+const https = require('https')
+const statusMoved = new Set([301, 302])
+const BufferList = require('bl')
+
+const proxy = http.createServer(async(client2proxy, proxy2client) => {
+  const bl = new BufferList
+  await new Promise((resolve) => {
+    client2proxy.pipe(bl)
+    client2proxy.on('end', resolve)
+  })
+
+  const headers = Object.keys(client2proxy.headers)
+  .filter(key => !/^proxy-/.test(key))
+  .reduce((headers, key) => {
+    headers[key] = client2proxy.headers[key]
+    return headers
+  }, Object.create(null))
+  const [host, port] = client2proxy.headers.host.split(':')
+  const {path} = url.parse(client2proxy.url)
+  const options = {
+    method: client2proxy.method,
+    path,
+    host,
+    port,
+    headers
+  }
+
+  function request(protocol) {
+    const body = bl.duplicate()
+    return new Promise((resolve, reject) => {
+      const proxy2server = protocol.request(options, (response) => {
+        response.pause()
+        resolve(response)
+      })
+      body.pipe(proxy2server)
+    })
+  }
+
+  let server2proxy = await request(http)
+
+  if (statusMoved.has(server2proxy.statusCode)) {
+    const location = url.parse(server2proxy.headers.location)
+    if ('https:' === location.protocol) {
+      if (host === location.host &&
+          path === location.path) {
+        options.port = null
+        server2proxy = await request(https)
+      }
+    }
+  }
+  proxy2client.writeHead(server2proxy.statusCode, server2proxy.headers)
+  server2proxy.pipe(proxy2client)
+  server2proxy.resume()
+})
+
+proxy.listen(process.env.PORT, '0.0.0.0')
+module.exports = proxy
