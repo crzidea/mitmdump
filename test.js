@@ -4,6 +4,7 @@ const HttpProxyAgent = require('http-proxy-agent')
 const assert = require('assert')
 
 describe('mitmdump', () => {
+
   let agent
   function $got(url, options) {
     options = options || {}
@@ -77,4 +78,16 @@ describe('mitmdump', () => {
       assert(response.headers.location)
     })
   })
+
+  describe('gzip', () => {
+    it('should be able to record', async () => {
+      const response = await $got('http://github.com?test')
+      assert.equal(response.statusCode, 200)
+      assert(response.headers)
+      assert.equal(response.headers['content-encoding'], 'gzip')
+      assert(response.headers['x-mitm-valuable'])
+      assert(response.body)
+    })
+  })
+
 })

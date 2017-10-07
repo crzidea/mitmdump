@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 const url = require('url')
 const http = require('http')
+const HttpProxyAgent = require('http-proxy-agent')
+if (process.env.HTTP_PROXY) {
+  http.globalAgent = new HttpProxyAgent(process.env.HTTP_PROXY)
+}
 const https = require('https')
-const statusMoved = new Set([301, 302])
+const zlib = require('zlib')
 const BufferList = require('bl')
-
 
 const middlewares = []
 
@@ -32,6 +35,13 @@ function isValuable(message, estimated) {
   return false
 }
 
+const statusMoved = new Set([301, 302])
+
+const unzip = {
+  gzip    : zlib.createGunzip,
+  deflate : zlib.createInflate
+}
+
 middlewares.push(async function() {
 
   const {client2proxy, proxy2client, options} = this
@@ -41,10 +51,16 @@ middlewares.push(async function() {
   }
 
   const bl = new BufferList
-  await new Promise((resolve) => {
-    client2proxy.pipe(bl)
-    client2proxy.on('end', resolve)
-  })
+
+  function buffer(source, buffer) {
+    return new Promise((resolve) => {
+      source.on('end', resolve)
+      source.pipe(buffer)
+      source.resume()
+    })
+  }
+
+  await buffer(client2proxy, bl)
 
   const record = {
     request: Object.assign({}, options, {body: bl.toString()}),
@@ -52,48 +68,61 @@ middlewares.push(async function() {
   }
 
   const request = (async (protocol) => {
-    const response = await this.request(protocol, bl.duplicate())
-    const {statusCode, headers} = response
-    if (isValuable(response)) {
+    const message = await this.request(protocol, bl.duplicate())
+    const {statusCode, headers} = message
+    const result = {message, stream: message}
+
+    const response = {statusCode, headers}
+    if (isValuable(message)) {
+
+      const origin = new BufferList
+      await buffer(message, origin)
+      const shallow = origin.duplicate()
+      let output = new BufferList
+      const encoding = message.headers['content-encoding']
+      if (encoding) {
+        const createStream = unzip[encoding.toLowerCase()]
+        if (createStream) {
+          await new Promise((resolve) => {
+            const unzipStream = createStream()
+            unzipStream.on('end', resolve)
+            shallow.pipe(unzipStream).pipe(output);
+          })
+        }
+      } else {
+        output = shallow
+      }
+      //console.log(origin.length, output.length);
+      result.stream = origin
+      response.body = output.toString()
       headers['x-mitm-valuable'] = true
+
     }
-    record.responses.push({ statusCode, headers })
-    return response
+    record.responses.push(response)
+
+    return result
   })
 
   let server2proxy = await request(http)
 
-  if (statusMoved.has(server2proxy.statusCode)) {
-    const location = url.parse(server2proxy.headers.location)
+  if (statusMoved.has(server2proxy.message.statusCode)) {
+    const location = url.parse(server2proxy.message.headers.location)
     const [host, port] = location.host.split(':')
     if ('https:' === location.protocol) {
       if (options.host === host &&
           options.path === location.path) {
         options.port = null
+        server2proxy.message.destroy()
         server2proxy = await request(https)
       }
     }
   }
 
-  //{
-    //const {statusCode, headers} = server2proxy
-    //const response = { statusCode, headers }
-    //proxy2client.writeHead(statusCode, headers)
-    //const bl = new BufferList
-    //server2proxy.pipe(bl)
-    //server2proxy.resume()
-    //await new Promise((resolve) => server2proxy.on('end', resolve))
-    // @TODO handle chunk
-    //response.body = bl.toString()
-    //record.responses.push(response)
-    //bl.pipe(proxy2client)
-  //}
-
   {
-    const {statusCode, headers} = server2proxy
+    const {statusCode, headers} = server2proxy.message
     proxy2client.writeHead(statusCode, headers)
-    server2proxy.pipe(proxy2client)
-    server2proxy.resume()
+    server2proxy.stream.pipe(proxy2client)
+    server2proxy.stream.resume()
   }
 
   //console.log(record);
