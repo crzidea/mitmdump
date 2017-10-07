@@ -5,7 +5,40 @@ const https = require('https')
 const statusMoved = new Set([301, 302])
 const BufferList = require('bl')
 
-const proxy = http.createServer(async(client2proxy, proxy2client) => {
+
+const middlewares = []
+
+const valuableTypes = new Set([
+  'text/plain',
+  'text/html',
+  'application/xhtml+xml',
+  'application/xml',
+  'application/javascript',
+  'application/json'
+])
+
+function isValuable(message, estimated) {
+  if (estimated && 'get' === message.method.toLowerCase()) {
+    return true
+  }
+  let type = message.headers['content-type']
+  if (!type) {
+    return false
+  }
+  type = type.split(';')[0].toLowerCase()
+  if (valuableTypes.has(type)) {
+    return true
+  }
+  return false
+}
+
+middlewares.push(async function() {
+
+  const {client2proxy, proxy2client, options} = this
+
+  if (!isValuable(client2proxy, true)) {
+    return true
+  }
 
   const bl = new BufferList
   await new Promise((resolve) => {
@@ -13,46 +46,29 @@ const proxy = http.createServer(async(client2proxy, proxy2client) => {
     client2proxy.on('end', resolve)
   })
 
-  const headers = Object.keys(client2proxy.headers)
-  .filter(key => !/^proxy-/.test(key))
-  .reduce((headers, key) => {
-    headers[key] = client2proxy.headers[key]
-    return headers
-  }, Object.create(null))
-  const {method} = client2proxy
-  const {path} = url.parse(client2proxy.url)
-  const [host, port] = client2proxy.headers.host.split(':')
-  const options = { method, path, host, port, headers }
-
   const record = {
     request: Object.assign({}, options, {body: bl.toString()}),
     responses: []
   }
 
-  function request(protocol) {
-    const body = bl.duplicate()
-    return new Promise((resolve, reject) => {
-      const proxy2server = protocol.request(options, (response) => {
-
-        response.pause()
-
-        const {statusCode, headers} = response
-        record.responses.push({ statusCode, headers })
-
-        resolve(response)
-
-      })
-      body.pipe(proxy2server)
-    })
-  }
+  const request = (async (protocol) => {
+    const response = await this.request(protocol, bl.duplicate())
+    const {statusCode, headers} = response
+    if (isValuable(response)) {
+      headers['x-mitm-valuable'] = true
+    }
+    record.responses.push({ statusCode, headers })
+    return response
+  })
 
   let server2proxy = await request(http)
 
   if (statusMoved.has(server2proxy.statusCode)) {
     const location = url.parse(server2proxy.headers.location)
+    const [host, port] = location.host.split(':')
     if ('https:' === location.protocol) {
-      if (host === location.host &&
-          path === location.path) {
+      if (options.host === host &&
+          options.path === location.path) {
         options.port = null
         server2proxy = await request(https)
       }
@@ -81,6 +97,69 @@ const proxy = http.createServer(async(client2proxy, proxy2client) => {
   }
 
   //console.log(record);
+
+})
+
+middlewares.push(async function() {
+  const {proxy2client} = this
+  let server2proxy = await this.request(http)
+  const {statusCode, headers} = server2proxy
+  proxy2client.writeHead(statusCode, headers)
+  server2proxy.pipe(proxy2client)
+  server2proxy.resume()
+})
+
+class Context {
+  constructor(client2proxy, proxy2client) {
+    this.client2proxy = client2proxy
+    this.proxy2client = proxy2client
+
+    const headers = Object.keys(client2proxy.headers)
+    .filter(key => !/^proxy-/.test(key))
+    .reduce((headers, key) => {
+      headers[key] = client2proxy.headers[key]
+      return headers
+    }, Object.create(null))
+    const {method} = client2proxy
+    const {path} = url.parse(client2proxy.url)
+    const [host, port] = client2proxy.headers.host.split(':')
+    headers.host = host
+    this.options = { method, path, host, headers }
+  }
+
+  async execute() {
+    for (const middleware of middlewares) {
+      const next = await middleware.call(this)
+      if (!next) {
+        break
+      }
+    }
+  }
+
+  async request(protocol, body) {
+    if (!body) {
+      body = this.client2proxy
+      body.resume()
+    }
+    return new Promise((resolve, reject) => {
+      const proxy2server = protocol.request(this.options, (response) => {
+        response.pause()
+        resolve(response)
+      })
+      body.pipe(proxy2server)
+    })
+  }
+
+}
+
+const proxy = http.createServer(async(client2proxy, proxy2client) => {
+
+  try {
+    context = new Context(client2proxy, proxy2client)
+    await context.execute()
+  } catch (e) {
+    console.error(e.stack);
+  }
 
 })
 
