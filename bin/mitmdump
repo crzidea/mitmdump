@@ -6,6 +6,7 @@ const statusMoved = new Set([301, 302])
 const BufferList = require('bl')
 
 const proxy = http.createServer(async(client2proxy, proxy2client) => {
+
   const bl = new BufferList
   await new Promise((resolve) => {
     client2proxy.pipe(bl)
@@ -18,22 +19,28 @@ const proxy = http.createServer(async(client2proxy, proxy2client) => {
     headers[key] = client2proxy.headers[key]
     return headers
   }, Object.create(null))
-  const [host, port] = client2proxy.headers.host.split(':')
+  const {method} = client2proxy
   const {path} = url.parse(client2proxy.url)
-  const options = {
-    method: client2proxy.method,
-    path,
-    host,
-    port,
-    headers
+  const [host, port] = client2proxy.headers.host.split(':')
+  const options = { method, path, host, port, headers }
+
+  const record = {
+    request: Object.assign({}, options, {body: bl.toString()}),
+    responses: []
   }
 
   function request(protocol) {
     const body = bl.duplicate()
     return new Promise((resolve, reject) => {
       const proxy2server = protocol.request(options, (response) => {
+
         response.pause()
+
+        const {statusCode, headers} = response
+        record.responses.push({ statusCode, headers })
+
         resolve(response)
+
       })
       body.pipe(proxy2server)
     })
@@ -51,9 +58,30 @@ const proxy = http.createServer(async(client2proxy, proxy2client) => {
       }
     }
   }
-  proxy2client.writeHead(server2proxy.statusCode, server2proxy.headers)
-  server2proxy.pipe(proxy2client)
-  server2proxy.resume()
+
+  //{
+    //const {statusCode, headers} = server2proxy
+    //const response = { statusCode, headers }
+    //proxy2client.writeHead(statusCode, headers)
+    //const bl = new BufferList
+    //server2proxy.pipe(bl)
+    //server2proxy.resume()
+    //await new Promise((resolve) => server2proxy.on('end', resolve))
+    // @TODO handle chunk
+    //response.body = bl.toString()
+    //record.responses.push(response)
+    //bl.pipe(proxy2client)
+  //}
+
+  {
+    const {statusCode, headers} = server2proxy
+    proxy2client.writeHead(statusCode, headers)
+    server2proxy.pipe(proxy2client)
+    server2proxy.resume()
+  }
+
+  //console.log(record);
+
 })
 
 proxy.listen(process.env.PORT, '0.0.0.0')
