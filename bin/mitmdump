@@ -21,7 +21,7 @@ const server = http.createServer(async(client2proxy, proxy2client) => {
     const context = new Context(client2proxy, proxy2client, proxy)
     await context.execute()
   } catch (e) {
-    console.error(e.stack);
+    throw e
     proxy2client.end()
   }
 
@@ -38,3 +38,7 @@ server.on('upgrade', (request, socket, head) => {
 
 server.listen(process.env.PORT)
 module.exports = server
+
+process.on('uncaughtException', (error) => {
+  console.error(e.stack);
+})
