@@ -18,18 +18,19 @@ if (HTTP_PROXY) {
 const server = http.createServer(async(client2proxy, proxy2client) => {
 
   try {
-    const context = new Context(client2proxy, proxy2client)
+    const context = new Context(client2proxy, proxy2client, proxy)
     await context.execute()
   } catch (e) {
     console.error(e.stack);
+    proxy2client.end()
   }
 
 })
 
 server.on('upgrade', (request, socket, head) => {
   const {path} = url.parse(request.url)
-  //const [host, port] = request.headers.host.split(':')
-  const target = `ws://${request.headers.host}${path}`
+  const [host, port] = request.headers.host.split(':')
+  const target = `ws://${host}`
   debug(`upgrade: ${target}`)
   proxy.ws(request, socket, head, {target})
 })
