@@ -1,0 +1,20 @@
+#!/bin/sh
+# Usage:
+#   client=192.168.1.2 gateway=192.168.1.1 server=192.168.0.1 port=8080 action=append ./gateway
+#   action=[insert|append|delete]
+
+iptables -t nat \
+  --$action PREROUTING \
+  -p tcp \
+  -s $client \
+  --dport 80 \
+  -j DNAT \
+  --to-destination $server:$port
+iptables -t nat \
+  --$action POSTROUTING \
+  -p tcp \
+  -s $client \
+  -d $server \
+  --dport $port \
+  -j SNAT \
+  --to-source $gateway
