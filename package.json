@@ -18,6 +18,7 @@
   "dependencies": {
     "bl": "^1.2.1",
     "bluebird": "^3.5.1",
+    "dateformat": "^3.0.2",
     "debug": "^3.1.0",
     "elasticsearch": "^13.3.1",
     "http-proxy": "^1.16.2",
