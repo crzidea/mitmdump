@@ -32,6 +32,19 @@ describe('mitmdump', () => {
     it('should not be followed', async () => {
       const response = await $got('http://nodejs.org/dist')
       assert.equal(response.statusCode, 301)
+      assert.equal(response.headers.location, 'http://nodejs.org/dist/')
+    })
+    it('should be replaced (https)', async () => {
+      const response = await $got('http://t.cn/aktT6M')
+      assert.equal(response.statusCode, 302)
+      assert.equal(response.headers.location, 'http://github.com')
+    })
+  })
+
+  describe('HEAD method', () => {
+    it('should bypass', async () => {
+      const response = await $got('http://nodejs.org/dist', {method: 'HEAD'})
+      assert.equal(response.statusCode, 301)
       assert(response.headers)
       assert.equal(response.headers.location, 'http://nodejs.org/dist/')
     })
