@@ -92,7 +92,7 @@ describe('mitmdump', () => {
   })
 
   describe('websocket', () => {
-    it.only('should bypass', async () => {
+    it('should bypass', async () => {
       const websocket = new WebSocket('ws://echo.websocket.org', {agent})
       const message = Math.random().toString()
       await new Promise((resolve, reject) => {
@@ -105,6 +105,30 @@ describe('mitmdump', () => {
           websocket.send(message)
         }
       })
+    })
+  })
+
+  describe('https: links', () => {
+    it('should be replace to http: (with compression)', async () => {
+      const response = await $got('http://github.com')
+      assert.equal(response.statusCode, 200)
+      assert(response.headers)
+      assert(response.headers['x-mitm-valuable'])
+      assert(response.body)
+      assert(!/["']\s*https:/.test(response.body))
+    })
+    it('should be replace to http: (no compression)', async () => {
+      const response = await $got(
+        'http://github.com',
+        {
+          headers: {'accept-encoding': ''}
+        }
+      )
+      assert.equal(response.statusCode, 200)
+      assert(response.headers)
+      assert(response.headers['x-mitm-valuable'])
+      assert(response.body)
+      assert(!/["']\s*https:/.test(response.body))
     })
   })
 

