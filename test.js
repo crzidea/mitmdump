@@ -1,5 +1,6 @@
 const mitmdump = require('./bin/mitmdump')
 const got = require('got')
+const WebSocket = require('ws')
 const HttpProxyAgent = require('http-proxy-agent')
 const assert = require('assert')
 
@@ -87,6 +88,23 @@ describe('mitmdump', () => {
       assert.equal(response.headers['content-encoding'], 'gzip')
       assert(response.headers['x-mitm-valuable'])
       assert(response.body)
+    })
+  })
+
+  describe('websocket', () => {
+    it.only('should bypass', async () => {
+      const websocket = new WebSocket('ws://echo.websocket.org', {agent})
+      const message = Math.random().toString()
+      await new Promise((resolve, reject) => {
+        websocket.onmessage = (event) => {
+          assert.equal(event.data, message)
+          resolve()
+        }
+        websocket.onerror = reject
+        websocket.onopen = () => {
+          websocket.send(message)
+        }
+      })
     })
   })
 

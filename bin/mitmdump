@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 const url = require('url')
 const http = require('http')
-const HttpProxyAgent = require('http-proxy-agent')
-if (process.env.HTTP_PROXY) {
-  http.globalAgent = new HttpProxyAgent(process.env.HTTP_PROXY)
-}
 const https = require('https')
 const zlib = require('zlib')
 const BufferList = require('bl')
+const debug = require('debug')('mitmdump')
+const HttpProxy = require('http-proxy')
+const proxy = HttpProxy.createProxy()
+
+const HTTP_PROXY = process.env.http_proxy || process.env.HTTP_PROXY
+if (HTTP_PROXY) {
+  debug(`using HTTP_PROXY: ${HTTP_PROXY}`)
+  const HttpProxyAgent = require('http-proxy-agent')
+  http.globalAgent = new HttpProxyAgent(HTTP_PROXY)
+}
 
 const middlewares = []
 
@@ -49,6 +55,7 @@ middlewares.push(async function() {
   if (!isValuable(client2proxy, true)) {
     return true
   }
+  debug('try do MITM attack')
 
   const bl = new BufferList
 
@@ -75,6 +82,7 @@ middlewares.push(async function() {
     const response = {statusCode, headers}
     if (isValuable(message)) {
 
+      debug('valuable attack')
       const origin = new BufferList
       await buffer(message, origin)
       const shallow = origin.duplicate()
@@ -130,12 +138,19 @@ middlewares.push(async function() {
 })
 
 middlewares.push(async function() {
+
+  debug('pipe everythinig')
+
+  //const target = `http://${this.options.host}${this.options.path}`
+  //proxy.web(this.client2proxy, this.proxy2client, {target})
+
   const {proxy2client} = this
-  let server2proxy = await this.request(http)
+  const server2proxy = await this.request(http)
   const {statusCode, headers} = server2proxy
   proxy2client.writeHead(statusCode, headers)
   server2proxy.pipe(proxy2client)
   server2proxy.resume()
+
 })
 
 class Context {
@@ -181,7 +196,7 @@ class Context {
 
 }
 
-const proxy = http.createServer(async(client2proxy, proxy2client) => {
+const server = http.createServer(async(client2proxy, proxy2client) => {
 
   try {
     context = new Context(client2proxy, proxy2client)
@@ -192,5 +207,14 @@ const proxy = http.createServer(async(client2proxy, proxy2client) => {
 
 })
 
-proxy.listen(process.env.PORT, '0.0.0.0')
-module.exports = proxy
+server.on('upgrade', (request, socket, head) => {
+  const {path} = url.parse(request.url)
+  //const [host, port] = request.headers.host.split(':')
+  const target = `ws://${request.headers.host}${path}`
+  debug(`upgrade: ${target}`)
+  proxy.ws(request, socket, head, {target})
+})
+
+
+server.listen(process.env.PORT, '0.0.0.0')
+module.exports = server
