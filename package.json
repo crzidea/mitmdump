@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "mocha"
+    "test": "mocha --exit --no-timeouts --bail",
+    "start": "bin/mitmdump"
   },
   "keywords": [],
   "author": "",
