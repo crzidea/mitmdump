@@ -21,8 +21,8 @@ const server = http.createServer(async(client2proxy, proxy2client) => {
     const context = new Context(client2proxy, proxy2client, proxy)
     await context.execute()
   } catch (e) {
-    throw e
     proxy2client.end()
+    throw e
   }
 
 })
