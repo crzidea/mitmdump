@@ -3,6 +3,7 @@ const got = require('got')
 const WebSocket = require('ws')
 const HttpProxyAgent = require('http-proxy-agent')
 const assert = require('assert')
+const elasticsearch = require('./lib/middleware.d/elasticsearch.js')
 
 describe('mitmdump', () => {
 
@@ -13,6 +14,7 @@ describe('mitmdump', () => {
     options.followRedirect = false
     return got(url, options)
   }
+
   before('prepare environment', () => {
     const address = mitmdump.address()
     agent = new HttpProxyAgent(`http://localhost:${address.port}`)
@@ -25,6 +27,7 @@ describe('mitmdump', () => {
       assert(response.body)
     })
   })
+
   describe('redirect', () => {
     it('should not be followed', async () => {
       const response = await $got('http://nodejs.org/dist')
@@ -33,6 +36,7 @@ describe('mitmdump', () => {
       assert.equal(response.headers.location, 'http://nodejs.org/dist/')
     })
   })
+
   describe('http2https proxy', () => {
     it('should rewrite and record request, html', async () => {
       const response = await $got('http://github.com?test')
@@ -129,6 +133,19 @@ describe('mitmdump', () => {
       assert(response.headers['x-mitm-valuable'])
       assert(response.body)
       assert(!/["']\s*https:/.test(response.body))
+    })
+  })
+
+  describe('search record', () => {
+    it('should be be able to be searched', (resolve) => {
+      elasticsearch.notification.once('done', async () => {
+        const {index, type} = elasticsearch.options
+        await elasticsearch.client.indices.refresh({index})
+        const data = await elasticsearch.client.search(elasticsearch.options)
+        assert(data.hits.total)
+        resolve()
+      })
+      $got('http://github.com')
     })
   })
 
