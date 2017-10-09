@@ -1,6 +1,6 @@
 #!/bin/sh
 # Usage:
-#   client=192.168.1.2 gateway=192.168.1.1 server=192.168.0.1 port=8080 action=append ./gateway
+#   client=192.168.1.0/24 gateway=192.168.1.1 server=192.168.0.1 port=8080 action=append ./gateway
 #   action=[insert|append|delete]
 
 iptables -t nat \
